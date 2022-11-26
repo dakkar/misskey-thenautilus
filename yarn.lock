@@ -31,7 +31,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/core@npm:^7.11.6, @babel/core@npm:^7.12.3":
+"@babel/core@npm:^7.11.6, @babel/core@npm:^7.12.3, @babel/core@npm:^7.20.2":
   version: 7.20.2
   resolution: "@babel/core@npm:7.20.2"
   dependencies:
@@ -3924,6 +3924,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"babel-plugin-prismjs@npm:^2.1.0":
+  version: 2.1.0
+  resolution: "babel-plugin-prismjs@npm:2.1.0"
+  peerDependencies:
+    prismjs: ^1.18.0
+  checksum: 8bc59ca46b493cb255ec914e26a0dd39c1aaee881e3701d6726db40152d4a176a96ac1438f80b0d705b188bee4106538de809bc79dff9774400da3d8331affce
+  languageName: node
+  linkType: hard
+
 "babel-preset-current-node-syntax@npm:^1.0.0":
   version: 1.0.1
   resolution: "babel-preset-current-node-syntax@npm:1.0.1"
@@ -5030,6 +5039,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "client@workspace:packages/client"
   dependencies:
+    "@babel/core": ^7.20.2
     "@discordapp/twemoji": 14.0.2
     "@fortawesome/fontawesome-free": 6.1.2
     "@rollup/plugin-alias": 4.0.2
@@ -5055,6 +5065,7 @@ __metadata:
     "@vue/compiler-sfc": 3.2.45
     autobind-decorator: 2.4.0
     autosize: 5.0.1
+    babel-plugin-prismjs: ^2.1.0
     blurhash: 2.0.4
     broadcast-channel: 4.18.1
     browser-image-resizer: "git+https://github.com/misskey-dev/browser-image-resizer#v2.2.1-misskey.3"

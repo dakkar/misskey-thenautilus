@@ -5,6 +5,7 @@ import { defineConfig } from 'vite';
 import locales from '../../locales';
 import meta from '../../package.json';
 import pluginJson5 from './vite.json5';
+import prismjsPlugin from './vite.prismjs';
 
 const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.json', '.json5', '.svg', '.sass', '.scss', '.css', '.vue'];
 
@@ -19,7 +20,14 @@ export default defineConfig(({ command, mode }) => {
 			pluginVue({
 				reactivityTransform: true,
 			}),
-			pluginJson5(),
+		        pluginJson5(),
+                        // this rewrites prismjs to include all
+                        // languages, not just the default ones
+                        prismjsPlugin({
+                            "languages": "all",
+                            "theme": "okaidia",
+                            "css": true
+                        }),
 		],
 
 		resolve: {
