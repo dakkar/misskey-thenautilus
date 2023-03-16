@@ -197,7 +197,7 @@ export class ApNoteService {
 		// 引用
 		let quote: Note | undefined | null;
 	
-		if (note._misskey_quote || note.quoteUrl) {
+		if (note._misskey_quote || note.quoteUrl || note.quoteUri) {
 			const tryResolveNote = async (uri: string): Promise<{
 				status: 'ok';
 				res: Note | null;
@@ -224,7 +224,7 @@ export class ApNoteService {
 				}
 			};
 	
-			const uris = unique([note._misskey_quote, note.quoteUrl].filter((x): x is string => typeof x === 'string'));
+			const uris = unique([note._misskey_quote, note.quoteUrl, note.quoteUri].filter((x): x is string => typeof x === 'string'));
 			const results = await Promise.all(uris.map(uri => tryResolveNote(uri)));
 	
 			quote = results.filter((x): x is { status: 'ok', res: Note | null } => x.status === 'ok').map(x => x.res).find(x => x);
