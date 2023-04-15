@@ -99,7 +99,7 @@ export class NotificationService implements OnApplicationShutdown {
 
 		const redisIdPromise = this.redisClient.xadd(
 			`notificationTimeline:${notifieeId}`,
-			'MAXLEN', '~', '300',
+			'MAXLEN', '~', '3000',
 			'*',
 			'data', JSON.stringify(notification));
 
