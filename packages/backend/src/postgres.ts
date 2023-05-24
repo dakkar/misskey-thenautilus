@@ -40,6 +40,7 @@ import { NoteFavorite } from '@/models/entities/NoteFavorite.js';
 import { NoteReaction } from '@/models/entities/NoteReaction.js';
 import { NoteThreadMuting } from '@/models/entities/NoteThreadMuting.js';
 import { NoteUnread } from '@/models/entities/NoteUnread.js';
+import { NoteEdit } from "@/models/entities/NoteEdit.js";
 import { Page } from '@/models/entities/Page.js';
 import { PageLike } from '@/models/entities/PageLike.js';
 import { PasswordResetRequest } from '@/models/entities/PasswordResetRequest.js';
@@ -142,7 +143,8 @@ export const entities = [
 	Muting,
 	RenoteMuting,
 	Blocking,
-	Note,
+        Note,
+        NoteEdit,
 	NoteFavorite,
 	NoteReaction,
 	NoteThreadMuting,

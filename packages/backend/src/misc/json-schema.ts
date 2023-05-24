@@ -21,6 +21,7 @@ import { packedNoteReactionSchema } from '@/models/json-schema/note-reaction.js'
 import { packedHashtagSchema } from '@/models/json-schema/hashtag.js';
 import { packedPageSchema } from '@/models/json-schema/page.js';
 import { packedNoteFavoriteSchema } from '@/models/json-schema/note-favorite.js';
+import { packedNoteEdit } from "@/models/json-schema/note-edit.js";
 import { packedChannelSchema } from '@/models/json-schema/channel.js';
 import { packedAntennaSchema } from '@/models/json-schema/antenna.js';
 import { packedClipSchema } from '@/models/json-schema/clip.js';
@@ -41,7 +42,8 @@ export const refs = {
 
 	UserList: packedUserListSchema,
 	App: packedAppSchema,
-	Note: packedNoteSchema,
+        Note: packedNoteSchema,
+        NoteEdit: packedNoteEdit,
 	NoteReaction: packedNoteReactionSchema,
 	NoteFavorite: packedNoteFavoriteSchema,
 	Notification: packedNotificationSchema,

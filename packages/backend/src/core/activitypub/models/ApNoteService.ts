@@ -1,6 +1,7 @@
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
 import promiseLimit from 'promise-limit';
 import { In } from 'typeorm';
+import * as mfm from 'mfm-js';
 import { DI } from '@/di-symbols.js';
 import type { PollsRepository, EmojisRepository } from '@/models/index.js';
 import type { Config } from '@/config.js';
@@ -33,6 +34,7 @@ import { ApImageService } from './ApImageService.js';
 import type { Resolver } from '../ApResolverService.js';
 import type { IObject, IPost } from '../type.js';
 import { checkHttps } from '@/misc/check-https.js';
+import { DB_MAX_IMAGE_COMMENT_LENGTH } from '@/const.js';
 
 @Injectable()
 export class ApNoteService {
@@ -47,6 +49,9 @@ export class ApNoteService {
 
 		@Inject(DI.emojisRepository)
 		private emojisRepository: EmojisRepository,
+
+		@Inject(DI.notesRepository)
+		private notesRepository: NotesRepository,
 
 		private idService: IdService,
 		private apMfmService: ApMfmService,
@@ -297,7 +302,95 @@ export class ApNoteService {
 			url: url,
 		}, silent);
 	}
+    
+	@bindThis
+	public async updateNote(value: string | IObject, resolver?: Resolver): Promise<Note | null> {
+		const uri = typeof value === "string" ? value : value.id;
+		if (!uri) throw new Error("Missing note uri");
+
+		// Skip if URI points to this server
+		if (uri.startsWith(`${config.url}/`)) throw new Error("uri points local");
+
+		if (resolver == null) resolver = this.apResolverService.createResolver();
 	
+		const post = await resolver.resolve(value) as IPost;
+            
+		const actor = await this.apPersonService.resolvePerson(getOneApId(post.attributedTo!), resolver) as RemoteUser;
+
+		if (actor.isSuspended) {
+			throw new Error('actor has been suspended');
+		}
+
+		// Already registered with this server?
+		const note = await this.notesRepository.findOneBy({ uri });
+		if (note == null) {
+			return await this.createNote(post, resolver);
+		}
+
+	        // Text parsing
+		let text: string | null = null;
+		if (post.source?.mediaType === 'text/x.misskeymarkdown' && typeof post.source.content === 'string') {
+			text = post.source.content;
+		} else if (typeof post._misskey_content !== 'undefined') {
+			text = post._misskey_content;
+		} else if (typeof post.content === 'string') {
+			text = this.apMfmService.htmlToMfm(post.content, post.tag);
+		}
+
+		const cw = post.summary === '' ? null : post.summary;
+
+		const limit = promiseLimit(2);
+	
+		post.attachment = Array.isArray(post.attachment) ? post.attachment : post.attachment ? [post.attachment] : [];
+
+
+            const files = (await Promise.all(
+			fileList.map(
+				(x) =>
+					limit(async () => {
+						const file = await this.apImageService.resolveImage(actor, x);
+						const update: Partial<DriveFile> = {};
+
+						const altText = truncate(x.name, DB_MAX_IMAGE_COMMENT_LENGTH);
+						if (file.comment !== altText) {
+							update.comment = altText;
+						}
+
+						// Don't unmark previously marked sensitive files,
+						// but if edited post contains sensitive marker, update it.
+						if (post.sensitive && !file.isSensitive) {
+							update.isSensitive = post.sensitive;
+						}
+
+					    if (notEmpty(update)) {
+                                                // DAKKAR I don't know what this is, maybe DriveFilesRepository?
+							await DriveFiles.update(file.id, update);
+							publishing = true;
+						}
+
+						return file;
+					}) as Promise<DriveFile>,
+			),
+		)
+	).filter((file) => file != null);
+/// DAKKAR vaguely stopped here
+		const fileIds = files.map((file) => file.id);
+		const fileTypes = files.map((file) => file.type);
+
+		const emojis = await this.extractEmojis(post.tag ?? [], actor.host).catch(e => {
+			this.logger.info(`extractEmojis: ${e}`);
+			return [] as Emoji[];
+		});
+	
+		const apEmojis = emojis.map(emoji => emoji.name);
+		const apMentions = await this.apMentionService.extractApMentions(post.tag, resolver);
+		const apHashtags = await extractApHashtags(post.tag);
+		const poll = await this.apQuestionService.extractPollFromQuestion(post, resolver).catch(() => undefined);
+		const choices = poll?.choices.flatMap((choice) => mfm.parse(choice)).flat() ?? [];
+
+
+        }
+
 	/**
 	 * Noteを解決します。
 	 *

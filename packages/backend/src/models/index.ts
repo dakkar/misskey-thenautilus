@@ -28,6 +28,7 @@ import { MutedNote } from '@/models/entities/MutedNote.js';
 import { Muting } from '@/models/entities/Muting.js';
 import { RenoteMuting } from '@/models/entities/RenoteMuting.js';
 import { Note } from '@/models/entities/Note.js';
+import { NoteEdit } from "./entities/NoteEdit.js";
 import { NoteFavorite } from '@/models/entities/NoteFavorite.js';
 import { NoteReaction } from '@/models/entities/NoteReaction.js';
 import { NoteThreadMuting } from '@/models/entities/NoteThreadMuting.js';
@@ -100,6 +101,7 @@ export {
 	NoteReaction,
 	NoteThreadMuting,
 	NoteUnread,
+	NoteEdit,
 	Page,
 	PageLike,
 	PasswordResetRequest,
@@ -167,6 +169,7 @@ export type NoteFavoritesRepository = Repository<NoteFavorite>;
 export type NoteReactionsRepository = Repository<NoteReaction>;
 export type NoteThreadMutingsRepository = Repository<NoteThreadMuting>;
 export type NoteUnreadsRepository = Repository<NoteUnread>;
+export type NoteEditsRepository = Repository<NoteEdit>;
 export type PagesRepository = Repository<Page>;
 export type PageLikesRepository = Repository<PageLike>;
 export type PasswordResetRequestsRepository = Repository<PasswordResetRequest>;

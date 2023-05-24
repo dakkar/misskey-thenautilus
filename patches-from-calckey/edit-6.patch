@@ -1,0 +1,25 @@
+commit 8b611a175ec42581767613954ee2491b01b70efc
+Author: Kainoa Kanter <kainoa@t1c.dev>
+Date:   2023-05-14 16:52:31 -0700
+
+    tooltip for edited
+
+diff --git a/packages/client/src/components/MkNoteHeader.vue b/packages/client/src/components/MkNoteHeader.vue
+index 283411120..0b8430628 100644
+--- a/packages/client/src/components/MkNoteHeader.vue
++++ b/packages/client/src/components/MkNoteHeader.vue
+@@ -23,9 +23,11 @@
+ 							:time="note.updatedAt"
+ 							mode="none"
+ 						>
+-							(<i class="ph-pencil-line ph-bold"></i>
+-							{{ i18n.ts.edited }})</MkTime
+-						>
++							<i
++								v-tooltip.noDelay="i18n.ts.edited"
++								class="ph-pencil-line ph-bold"
++							></i>
++						</MkTime>
+ 					</MkA>
+ 					<MkVisibility :note="note" />
+ 				</div>

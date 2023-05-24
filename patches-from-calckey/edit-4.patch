@@ -1,0 +1,23 @@
+commit 389c531b2cbe8fafb5535cf4722512d4a99573f3
+Author: Kaity A <kaity@theallans.com.au>
+Date:   2023-05-02 18:22:42 +1000
+
+    update file sensitivity on note edit
+
+diff --git a/packages/backend/src/remote/activitypub/models/note.ts b/packages/backend/src/remote/activitypub/models/note.ts
+index f699497d5..7b41de670 100644
+--- a/packages/backend/src/remote/activitypub/models/note.ts
++++ b/packages/backend/src/remote/activitypub/models/note.ts
+@@ -589,6 +589,12 @@ export async function updateNote(value: string | IObject, resolver?: Resolver) {
+ 							update.comment = altText;
+ 						}
+ 
++						// Don't unmark previously marked sensitive files,
++						// but if edited post contains sensitive marker, update it.
++						if (post.sensitive && !file.isSensitive) {
++							update.isSensitive = post.sensitive;
++						}
++
+ 						if (notEmpty(update)) {
+ 							await DriveFiles.update(file.id, update);
+ 							publishing = true;

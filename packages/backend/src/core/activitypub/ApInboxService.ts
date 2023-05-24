@@ -729,11 +729,23 @@ export class ApInboxService {
 		if (isActor(object)) {
 			await this.apPersonService.updatePerson(actor.uri!, resolver, object);
 			return 'ok: Person updated';
-		} else if (getApType(object) === 'Question') {
-			await this.apQuestionService.updateQuestion(object, resolver).catch(err => console.error(err));
-			return 'ok: Question updated';
-		} else {
-			return `skip: Unknown type: ${getApType(object)}`;
+		}
+
+		const objectType = getApType(object);
+		switch (objectType) {
+			case "Question":
+			case "Note":
+			case "Article":
+			case "Document":
+			case "Page":
+				let failed = false;
+				await this.apNoteService.updateNote(object, resolver).catch((e: Error) => {
+					failed = true;
+				});
+				return failed ? "skip: Note update failed" : "ok: Note updated";
+
+			default:
+				return `skip: Unknown type: ${objectType}`;
 		}
 	}
 

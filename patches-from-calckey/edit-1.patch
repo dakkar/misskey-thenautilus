@@ -1,0 +1,908 @@
+commit 627a71701ffc17215e3906f56322681a5ddb6bb5
+Author: Kaity A <kaity@theallans.com.au>
+Date:   2023-05-01 02:29:50 +1000
+
+    Implement inbound note edit federation
+
+diff --git a/locales/en-US.yml b/locales/en-US.yml
+index f9d4d23f0..6385f464a 100644
+--- a/locales/en-US.yml
++++ b/locales/en-US.yml
+@@ -46,9 +46,12 @@ unpin: "Unpin from profile"
+ copyContent: "Copy contents"
+ copyLink: "Copy link"
+ delete: "Delete"
++deleted: "Deleted"
+ deleteAndEdit: "Delete and edit"
+ deleteAndEditConfirm: "Are you sure you want to delete this post and edit it? You\
+   \ will lose all reactions, boosts and replies to it."
++editNote: "Edit note"
++edited: "Edited"
+ addToList: "Add to list"
+ sendMessage: "Send a message"
+ copyUsername: "Copy username"
+diff --git a/packages/backend/migration/1682753227899-NoteEdit.js b/packages/backend/migration/1682753227899-NoteEdit.js
+new file mode 100644
+index 000000000..55a0de020
+--- /dev/null
++++ b/packages/backend/migration/1682753227899-NoteEdit.js
+@@ -0,0 +1,53 @@
++export class NoteEdit1682753227899 {
++	name = "NoteEdit1682753227899";
++
++	async up(queryRunner) {
++		await queryRunner.query(`
++			CREATE TABLE "note_edit" (
++					"id" character varying(32) NOT NULL,
++					"noteId" character varying(32) NOT NULL,
++					"text" text,
++					"cw" character varying(512),
++					"fileIds" character varying(32) array NOT NULL DEFAULT '{}',
++					"updatedAt" TIMESTAMP WITH TIME ZONE NOT NULL,
++					CONSTRAINT "PK_736fc6e0d4e222ecc6f82058e08" PRIMARY KEY ("id")
++			)
++		`);
++		await queryRunner.query(`
++			COMMENT ON COLUMN "note_edit"."noteId" IS 'The ID of note.'
++		`);
++		await queryRunner.query(`
++			COMMENT ON COLUMN "note_edit"."updatedAt" IS 'The updated date of the Note.'
++		`);
++		await queryRunner.query(`
++			CREATE INDEX "IDX_702ad5ae993a672e4fbffbcd38" ON "note_edit" ("noteId")
++		`);
++		await queryRunner.query(`
++			ALTER TABLE "note"
++			ADD "updatedAt" TIMESTAMP WITH TIME ZONE
++		`);
++		await queryRunner.query(`
++			COMMENT ON COLUMN "note"."updatedAt" IS 'The updated date of the Note.'
++		`);
++		await queryRunner.query(`
++			ALTER TABLE "note_edit"
++			ADD CONSTRAINT "FK_702ad5ae993a672e4fbffbcd38c"
++			FOREIGN KEY ("noteId")
++			REFERENCES "note"("id")
++			ON DELETE CASCADE
++			ON UPDATE NO ACTION
++		`);
++	}
++
++	async down(queryRunner) {
++		await queryRunner.query(`
++			ALTER TABLE "note_edit" DROP CONSTRAINT "FK_702ad5ae993a672e4fbffbcd38c"
++		`);
++		await queryRunner.query(`
++			ALTER TABLE "note" DROP COLUMN "updatedAt"
++		`);
++		await queryRunner.query(`
++			DROP TABLE "note_edit"
++		`);
++	}
++}
+diff --git a/packages/backend/src/db/postgre.ts b/packages/backend/src/db/postgre.ts
+index bdeb910e8..dd202b3de 100644
+--- a/packages/backend/src/db/postgre.ts
++++ b/packages/backend/src/db/postgre.ts
+@@ -72,6 +72,7 @@ import { PasswordResetRequest } from "@/models/entities/password-reset-request.j
+ import { UserPending } from "@/models/entities/user-pending.js";
+ import { Webhook } from "@/models/entities/webhook.js";
+ import { UserIp } from "@/models/entities/user-ip.js";
++import { NoteEdit } from "@/models/entities/note-edit.js";
+ 
+ import { entities as charts } from "@/services/chart/entities.js";
+ import { envOption } from "../env.js";
+@@ -140,6 +141,7 @@ export const entities = [
+ 	RenoteMuting,
+ 	Blocking,
+ 	Note,
++	NoteEdit,
+ 	NoteFavorite,
+ 	NoteReaction,
+ 	NoteWatching,
+diff --git a/packages/backend/src/misc/schema.ts b/packages/backend/src/misc/schema.ts
+index 7eaeb92e0..6e03d30d9 100644
+--- a/packages/backend/src/misc/schema.ts
++++ b/packages/backend/src/misc/schema.ts
+@@ -30,6 +30,7 @@ import { packedFederationInstanceSchema } from "@/models/schema/federation-insta
+ import { packedQueueCountSchema } from "@/models/schema/queue.js";
+ import { packedGalleryPostSchema } from "@/models/schema/gallery-post.js";
+ import { packedEmojiSchema } from "@/models/schema/emoji.js";
++import { packedNoteEdit } from "@/models/schema/note-edit.js";
+ 
+ export const refs = {
+ 	UserLite: packedUserLiteSchema,
+@@ -45,6 +46,7 @@ export const refs = {
+ 	App: packedAppSchema,
+ 	MessagingMessage: packedMessagingMessageSchema,
+ 	Note: packedNoteSchema,
++	NoteEdit: packedNoteEdit,
+ 	NoteReaction: packedNoteReactionSchema,
+ 	NoteFavorite: packedNoteFavoriteSchema,
+ 	Notification: packedNotificationSchema,
+diff --git a/packages/backend/src/models/entities/note-edit.ts b/packages/backend/src/models/entities/note-edit.ts
+new file mode 100644
+index 000000000..a65375efb
+--- /dev/null
++++ b/packages/backend/src/models/entities/note-edit.ts
+@@ -0,0 +1,51 @@
++import {
++	Entity,
++	JoinColumn,
++	Column,
++	ManyToOne,
++	PrimaryColumn,
++	Index,
++} from "typeorm";
++import { Note } from "./note.js";
++import { id } from "../id.js";
++import { DriveFile } from "./drive-file.js";
++
++@Entity()
++export class NoteEdit {
++	@PrimaryColumn(id())
++	public id: string;
++
++	@Index()
++	@Column({
++		...id(),
++		comment: 'The ID of note.',
++	})
++	public noteId: Note["id"];
++
++	@ManyToOne(type => Note, {
++		onDelete: 'CASCADE',
++	})
++	@JoinColumn()
++	public note: Note | null;
++
++	@Column('text', {
++		nullable: true,
++	})
++	public text: string | null;
++
++	@Column('varchar', {
++		length: 512, nullable: true,
++	})
++	public cw: string | null;
++
++	@Column({
++		...id(),
++		array: true, default: '{}',
++	})
++	public fileIds: DriveFile["id"][];
++
++	@Column('timestamp with time zone', {
++		comment: 'The updated date of the Note.',
++	})
++	public updatedAt: Date;
++}
+diff --git a/packages/backend/src/models/entities/note.ts b/packages/backend/src/models/entities/note.ts
+index fd6b170c0..10449bb6d 100644
+--- a/packages/backend/src/models/entities/note.ts
++++ b/packages/backend/src/models/entities/note.ts
+@@ -230,6 +230,12 @@ export class Note {
+ 		comment: '[Denormalized]',
+ 	})
+ 	public renoteUserHost: string | null;
++
++	@Column('timestamp with time zone', {
++		nullable: true,
++		comment: 'The updated date of the Note.',
++	})
++	public updatedAt: Date;
+ 	//#endregion
+ 
+ 	constructor(data: Partial<Note>) {
+diff --git a/packages/backend/src/models/index.ts b/packages/backend/src/models/index.ts
+index f68166c17..cfc3b01c5 100644
+--- a/packages/backend/src/models/index.ts
++++ b/packages/backend/src/models/index.ts
+@@ -67,11 +67,13 @@ import { UserPending } from "./entities/user-pending.js";
+ import { InstanceRepository } from "./repositories/instance.js";
+ import { Webhook } from "./entities/webhook.js";
+ import { UserIp } from "./entities/user-ip.js";
++import { NoteEdit } from "./entities/note-edit.js";
+ 
+ export const Announcements = db.getRepository(Announcement);
+ export const AnnouncementReads = db.getRepository(AnnouncementRead);
+ export const Apps = AppRepository;
+ export const Notes = NoteRepository;
++export const NoteEdits = db.getRepository(NoteEdit);
+ export const NoteFavorites = NoteFavoriteRepository;
+ export const NoteWatchings = db.getRepository(NoteWatching);
+ export const NoteThreadMutings = db.getRepository(NoteThreadMuting);
+diff --git a/packages/backend/src/models/repositories/note.ts b/packages/backend/src/models/repositories/note.ts
+index 5e56a817b..74696f851 100644
+--- a/packages/backend/src/models/repositories/note.ts
++++ b/packages/backend/src/models/repositories/note.ts
+@@ -235,10 +235,11 @@ export const NoteRepository = db.getRepository(Note).extend({
+ 			mentions: note.mentions.length > 0 ? note.mentions : undefined,
+ 			uri: note.uri || undefined,
+ 			url: note.url || undefined,
++			updatedAt: note.updatedAt?.toISOString() || undefined,
+ 
+ 			...(opts.detail
+ 				? {
+-						reply: note.replyId
++							reply: note.replyId
+ 							? this.pack(note.reply || note.replyId, me, {
+ 									detail: false,
+ 									_hint_: options?._hint_,
+diff --git a/packages/backend/src/models/schema/note-edit.ts b/packages/backend/src/models/schema/note-edit.ts
+new file mode 100644
+index 000000000..e877f3f94
+--- /dev/null
++++ b/packages/backend/src/models/schema/note-edit.ts
+@@ -0,0 +1,49 @@
++export const packedNoteEdit = {
++	type: "object",
++	properties: {
++		id: {
++			type: "string",
++			optional: false,
++			nullable: false,
++			format: "id",
++			example: "xxxxxxxxxx",
++		},
++		updatedAt: {
++			type: "string",
++			optional: false,
++			nullable: false,
++			format: "date-time",
++		},
++		note: {
++			type: "object",
++			optional: false,
++			nullable: false,
++			ref: "Note",
++		},
++		noteId: {
++			type: "string",
++			optional: false,
++			nullable: false,
++			format: "id",
++		},
++		text: {
++			type: "string",
++			optional: true,
++			nullable: true,
++		},
++		cw: {
++			type: "string",
++			optional: true,
++			nullable: true,
++		},
++		fileIds: {
++			type: "array",
++			optional: true,
++			nullable: true,
++			items: {
++				type: "string",
++				format: "id",
++			},
++		},
++	},
++} as const;
+diff --git a/packages/backend/src/remote/activitypub/kernel/update/index.ts b/packages/backend/src/remote/activitypub/kernel/update/index.ts
+index 4f1514ddd..558a20ce0 100644
+--- a/packages/backend/src/remote/activitypub/kernel/update/index.ts
++++ b/packages/backend/src/remote/activitypub/kernel/update/index.ts
+@@ -2,7 +2,7 @@ import type { CacheableRemoteUser } from "@/models/entities/user.js";
+ import type { IUpdate } from "../../type.js";
+ import { getApType, isActor } from "../../type.js";
+ import { apLogger } from "../../logger.js";
+-import { updateQuestion } from "../../models/question.js";
++import { updateNote } from "../../models/note.js";
+ import Resolver from "../../resolver.js";
+ import { updatePerson } from "../../models/person.js";
+ 
+@@ -29,10 +29,22 @@ export default async (
+ 	if (isActor(object)) {
+ 		await updatePerson(actor.uri!, resolver, object);
+ 		return "ok: Person updated";
+-	} else if (getApType(object) === "Question") {
+-		await updateQuestion(object, resolver).catch((e) => console.log(e));
+-		return "ok: Question updated";
+-	} else {
+-		return `skip: Unknown type: ${getApType(object)}`;
++	}
++
++	const objectType = getApType(object);
++	switch (objectType) {
++		case "Question":
++		case "Note":
++		case "Article":
++		case "Document":
++		case "Page":
++			let failed = false;
++			await updateNote(object, resolver).catch((e: Error) => {
++				failed = true;
++			});
++			return failed ? "skip: Note update failed" : "ok: Note updated";
++
++		default:
++			return `skip: Unknown type: ${objectType}`;
+ 	}
+ };
+diff --git a/packages/backend/src/remote/activitypub/models/note.ts b/packages/backend/src/remote/activitypub/models/note.ts
+index 033157b08..6508d01e9 100644
+--- a/packages/backend/src/remote/activitypub/models/note.ts
++++ b/packages/backend/src/remote/activitypub/models/note.ts
+@@ -1,22 +1,32 @@
+ import promiseLimit from "promise-limit";
+-
++import * as mfm from "mfm-js";
+ import config from "@/config/index.js";
+ import Resolver from "../resolver.js";
+ import post from "@/services/note/create.js";
++import { extractMentionedUsers } from "@/services/note/create.js";
+ import { resolvePerson } from "./person.js";
+ import { resolveImage } from "./image.js";
+-import type { CacheableRemoteUser } from "@/models/entities/user.js";
++import type {
++	ILocalUser,
++	CacheableRemoteUser,
++} from "@/models/entities/user.js";
+ import { htmlToMfm } from "../misc/html-to-mfm.js";
+ import { extractApHashtags } from "./tag.js";
+ import { unique, toArray, toSingle } from "@/prelude/array.js";
+-import { extractPollFromQuestion } from "./question.js";
++import { extractPollFromQuestion, updateQuestion } from "./question.js";
+ import vote from "@/services/note/polls/vote.js";
+ import { apLogger } from "../logger.js";
+ import type { DriveFile } from "@/models/entities/drive-file.js";
+ import { deliverQuestionUpdate } from "@/services/note/polls/update.js";
+ import { extractDbHost, toPuny } from "@/misc/convert-host.js";
+-import { Emojis, Polls, MessagingMessages } from "@/models/index.js";
+-import type { Note } from "@/models/entities/note.js";
++import {
++	Emojis,
++	Polls,
++	MessagingMessages,
++	Notes,
++	NoteEdits,
++} from "@/models/index.js";
++import type { IMentionedRemoteUsers, Note } from "@/models/entities/note.js";
+ import type { IObject, IPost } from "../type.js";
+ import {
+ 	getOneApId,
+@@ -28,7 +38,6 @@ import {
+ } from "../type.js";
+ import type { Emoji } from "@/models/entities/emoji.js";
+ import { genId } from "@/misc/gen-id.js";
+-import { fetchMeta } from "@/misc/fetch-meta.js";
+ import { getApLock } from "@/misc/app-lock.js";
+ import { createMessage } from "@/services/messages/create.js";
+ import { parseAudience } from "../audience.js";
+@@ -36,6 +45,10 @@ import { extractApMentions } from "./mention.js";
+ import DbResolver from "../db-resolver.js";
+ import { StatusError } from "@/misc/fetch.js";
+ import { shouldBlockInstance } from "@/misc/should-block-instance.js";
++import { publishNoteStream } from "@/services/stream.js";
++import { extractHashtags } from "@/misc/extract-hashtags.js";
++import { UserProfiles } from "@/models/index.js";
++import { In } from "typeorm";
+ 
+ const logger = apLogger;
+ 
+@@ -497,3 +510,204 @@ export async function extractEmojis(
+ 		}),
+ 	);
+ }
++
++type TagDetail = {
++	type: string;
++	name: string;
++};
++
++export async function updateNote(value: string | IObject, resolver?: Resolver) {
++	const uri = typeof value === "string" ? value : value.id;
++	if (!uri) throw new Error("Missing note uri");
++
++	// Skip if URI points to this server
++	if (uri.startsWith(`${config.url}/`)) throw new Error("uri points local");
++
++	// A new resolver is created if not specified
++	if (resolver == null) resolver = new Resolver();
++
++	// Resolve the updated Note object
++	const post = (await resolver.resolve(value)) as IPost;
++
++	const actor = (await resolvePerson(
++		getOneApId(post.attributedTo),
++		resolver,
++	)) as CacheableRemoteUser;
++
++	// Already registered with this server?
++	const note = await Notes.findOneBy({ uri });
++	if (note == null) {
++		return await createNote(post, resolver);
++	}
++
++	// Text parsing
++	let text: string | null = null;
++	if (
++		post.source?.mediaType === "text/x.misskeymarkdown" &&
++		typeof post.source?.content === "string"
++	) {
++		text = post.source.content;
++	} else if (typeof post._misskey_content !== "undefined") {
++		text = post._misskey_content;
++	} else if (typeof post.content === "string") {
++		text = htmlToMfm(post.content, post.tag);
++	}
++
++	const cw = post.sensitive && post.summary;
++
++	// File parsing
++	const fileList = post.attachment
++		? Array.isArray(post.attachment)
++			? post.attachment
++			: [post.attachment]
++		: [];
++	const files = fileList.map((f) => (f.sensitive = post.sensitive));
++
++	// Fetch files
++	const limit = promiseLimit(2);
++
++	const driveFiles = (
++		await Promise.all(
++			fileList.map(
++				(x) => limit(() => resolveImage(actor, x)) as Promise<DriveFile>,
++			),
++		)
++	).filter((file) => file != null);
++	const fileIds = driveFiles.map((file) => file.id);
++	const fileTypes = driveFiles.map((file) => file.type);
++
++	const apEmojis = (
++		await extractEmojis(post.tag || [], actor.host).catch((e) => [])
++	).map((emoji) => emoji.name);
++	const apMentions = await extractApMentions(post.tag);
++	const apHashtags = await extractApHashtags(post.tag);
++
++	const poll = await extractPollFromQuestion(post, resolver).catch(
++		() => undefined,
++	);
++
++	const choices = poll?.choices.map((choice) => mfm.parse(choice)).flat() ?? [];
++
++	const tokens = mfm
++		.parse(text || "")
++		.concat(mfm.parse(cw || ""))
++		.concat(choices);
++
++	const hashTags: string[] = apHashtags || extractHashtags(tokens);
++
++	const mentionUsers =
++		apMentions || (await extractMentionedUsers(actor, tokens));
++
++	const mentionUserIds = mentionUsers.map((user) => user.id);
++	const remoteUsers = mentionUsers.filter((user) => user.host != null);
++	const remoteUserIds = remoteUsers.map((user) => user.id);
++	const remoteProfiles = await UserProfiles.findBy({
++		userId: In(remoteUserIds),
++	});
++	const mentionedRemoteUsers = remoteUsers.map((user) => {
++		const profile = remoteProfiles.find(
++			(profile) => profile.userId === user.id,
++		);
++		return {
++			username: user.username,
++			host: user.host ?? null,
++			uri: user.uri,
++			url: profile ? profile.url : undefined,
++		} as IMentionedRemoteUsers[0];
++	});
++
++	let updating = false;
++	const update = {} as Partial<Note>;
++	if (text && text !== note.text) {
++		update.text = text;
++		updating = true;
++	}
++	if (cw !== note.cw) {
++		update.cw = cw ? cw : null;
++		updating = true;
++	}
++	if (fileIds.sort().join(",") !== note.fileIds.sort().join(",")) {
++		update.fileIds = fileIds;
++		update.attachedFileTypes = fileTypes;
++		updating = true;
++	}
++
++	if (hashTags.sort().join(",") !== note.tags.sort().join(",")) {
++		update.tags = hashTags;
++		updating = true;
++	}
++
++	if (mentionUserIds.sort().join(",") !== note.mentions.sort().join(",")) {
++		update.mentions = mentionUserIds;
++		update.mentionedRemoteUsers = JSON.stringify(mentionedRemoteUsers);
++		updating = true;
++	}
++
++	if (apEmojis.sort().join(",") !== note.emojis.sort().join(",")) {
++		update.emojis = apEmojis;
++		updating = true;
++	}
++
++	if (note.hasPoll !== !!poll) {
++		update.hasPoll = !!poll;
++		updating = true;
++	}
++
++	if (poll) {
++		const dbPoll = await Polls.findOneBy({ noteId: note.id });
++		if (dbPoll == null) {
++			await Polls.insert({
++				noteId: note.id,
++				choices: poll?.choices,
++				multiple: poll?.multiple,
++				votes: poll?.votes,
++				expiresAt: poll?.expiresAt,
++				noteVisibility: note.visibility,
++				userId: actor.id,
++				userHost: actor.host,
++			});
++			updating = true;
++		} else if (
++			dbPoll.multiple !== poll.multiple ||
++			dbPoll.expiresAt !== poll.expiresAt ||
++			dbPoll.noteVisibility !== note.visibility ||
++			dbPoll.votes.length !== poll.votes?.length ||
++			JSON.stringify(dbPoll.choices) !== JSON.stringify(poll.choices)
++		) {
++			await Polls.update(
++				{ noteId: note.id },
++				{
++					choices: poll?.choices,
++					multiple: poll?.multiple,
++					votes: poll?.votes,
++					expiresAt: poll?.expiresAt,
++					noteVisibility: note.visibility,
++				},
++			);
++			updating = true;
++		}
++	}
++
++	// Update Note
++	if (updating) {
++		update.updatedAt = new Date();
++
++		// Save updated note to the database
++		await Notes.update({ uri }, update);
++
++		// Save an edit history for the previous note
++		await NoteEdits.insert({
++			id: genId(),
++			noteId: note.id,
++			text: note.text,
++			cw: note.cw,
++			fileIds: note.fileIds,
++			updatedAt: update.updatedAt,
++		});
++
++		// Publish update event for the updated note details
++		publishNoteStream(note.id, "updated", {
++			updatedAt: update.updatedAt,
++		});
++	}
++}
+diff --git a/packages/backend/src/server/api/stream/types.ts b/packages/backend/src/server/api/stream/types.ts
+index 9becf9f64..2c59d51d1 100644
+--- a/packages/backend/src/server/api/stream/types.ts
++++ b/packages/backend/src/server/api/stream/types.ts
+@@ -145,6 +145,9 @@ export interface NoteStreamTypes {
+ 	replied: {
+ 		id: Note["id"];
+ 	};
++	updated: {
++		updatedAt: Note["updatedAt"];
++	};
+ }
+ type NoteStreamEventTypes = {
+ 	[key in keyof NoteStreamTypes]: {
+diff --git a/packages/backend/src/services/note/create.ts b/packages/backend/src/services/note/create.ts
+index 5dd324d89..a3d784cba 100644
+--- a/packages/backend/src/services/note/create.ts
++++ b/packages/backend/src/services/note/create.ts
+@@ -846,7 +846,7 @@ function incNotesCountOfUser(user: { id: User["id"] }) {
+ 		.execute();
+ }
+ 
+-async function extractMentionedUsers(
++export async function extractMentionedUsers(
+ 	user: { host: User["host"] },
+ 	tokens: mfm.MfmNode[],
+ ): Promise<User[]> {
+diff --git a/packages/calckey-js/src/streaming.types.ts b/packages/calckey-js/src/streaming.types.ts
+index 44ef647bc..7f1edc87d 100644
+--- a/packages/calckey-js/src/streaming.types.ts
++++ b/packages/calckey-js/src/streaming.types.ts
+@@ -1,4 +1,4 @@
+-import {
++import type {
+ 	Antenna,
+ 	CustomEmoji,
+ 	DriveFile,
+@@ -171,6 +171,13 @@ export type NoteUpdatedEvent =
+ 			body: {
+ 				id: Note["id"];
+ 			};
++	  }
++	| {
++			id: Note["id"];
++			type: "updated";
++			body: {
++				updatedAt: string;
++			};
+ 	  };
+ 
+ export type BroadcastEvents = {
+diff --git a/packages/client/src/components/MkNoteDetailed.vue b/packages/client/src/components/MkNoteDetailed.vue
+index de9cfd0bc..aed5c61ae 100644
+--- a/packages/client/src/components/MkNoteDetailed.vue
++++ b/packages/client/src/components/MkNoteDetailed.vue
+@@ -108,7 +108,7 @@ const props = defineProps<{
+ 
+ const inChannel = inject("inChannel", null);
+ 
+-let note = $ref(deepClone(props.note));
++let note = $ref(props.note);
+ 
+ const enableEmojiReactions = defaultStore.state.enableEmojiReactions;
+ 
+@@ -174,15 +174,12 @@ useNoteCapture({
+ 
+ function reply(viaKeyboard = false): void {
+ 	pleaseLogin();
+-	os.post(
+-		{
+-			reply: appearNote,
+-			animation: !viaKeyboard,
+-		},
+-		() => {
+-			focus();
+-		}
+-	);
++	os.post({
++		reply: appearNote,
++		animation: !viaKeyboard,
++	}).then(() => {
++		focus();
++	});
+ }
+ 
+ function react(viaKeyboard = false): void {
+@@ -309,19 +306,65 @@ if (appearNote.replyId) {
+ 	});
+ }
+ 
+-function onNoteReplied(noteData: NoteUpdatedEvent): void {
++async function onNoteUpdated(noteData: NoteUpdatedEvent): Promise<void> {
+ 	const { type, id, body } = noteData;
+-	if (type === "replied" && id === appearNote.id) {
+-		const { id: createdId } = body;
+-
+-		os.api("notes/show", {
+-			noteId: createdId,
+-		}).then((note) => {
+-			if (note.replyId === appearNote.id) {
+-				replies.value.unshift(note);
+-				directReplies.value.unshift(note);
++
++	let found = -1;
++	if (id === appearNote.id) {
++		found = 0;
++	} else {
++		for (let i = 0; i < replies.value.length; i++) {
++			const reply = replies.value[i];
++			if (reply.id === id) {
++				found = i + 1;
++				break;
++			}
++		}
++	}
++
++	if (found === -1) {
++		return;
++	}
++
++	switch (type) {
++		case "replied":
++			const { id: createdId } = body;
++			const replyNote = await os.api("notes/show", {
++				noteId: createdId,
++			});
++
++			replies.value.splice(found, 0, replyNote);
++			if (found === 0) {
++				directReplies.value.unshift(replyNote);
++			}
++			break;
++
++		case "updated":
++			let updatedNote = appearNote;
++			if (found > 0) {
++				updatedNote = replies.value[found - 1];
++			}
++
++			const editedNote = await os.api("notes/show", {
++				noteId: id,
++			});
++
++			const keys = new Set<string>();
++			Object.keys(editedNote)
++				.concat(Object.keys(updatedNote))
++				.forEach((key) => keys.add(key));
++			keys.forEach((key) => {
++				updatedNote[key] = editedNote[key];
++			});
++			break;
++
++		case "deleted":
++			if (found === 0) {
++				isDeleted.value = true;
++			} else {
++				replies.value.splice(found - 1, 1);
+ 			}
+-		});
++			break;
+ 	}
+ }
+ 
+@@ -330,19 +373,19 @@ document.addEventListener("wheel", () => {
+ });
+ 
+ onMounted(() => {
+-	stream.on("noteUpdated", onNoteReplied);
++	stream.on("noteUpdated", onNoteUpdated);
+ 	isScrolling = false;
+-	noteEl.scrollIntoView();
++	noteEl?.scrollIntoView();
+ });
+ 
+ onUpdated(() => {
+ 	if (!isScrolling) {
+-		noteEl.scrollIntoView();
++		noteEl?.scrollIntoView();
+ 	}
+ });
+ 
+ onUnmounted(() => {
+-	stream.off("noteUpdated", onNoteReplied);
++	stream.off("noteUpdated", onNoteUpdated);
+ });
+ </script>
+ 
+diff --git a/packages/client/src/components/MkNoteHeader.vue b/packages/client/src/components/MkNoteHeader.vue
+index c4443141b..65f9a336f 100644
+--- a/packages/client/src/components/MkNoteHeader.vue
++++ b/packages/client/src/components/MkNoteHeader.vue
+@@ -18,6 +18,13 @@
+ 				<div class="info">
+ 					<MkA class="created-at" :to="notePage(note)">
+ 						<MkTime :time="note.createdAt" />
++						<MkTime
++							v-if="note.updatedAt"
++							:time="note.updatedAt"
++							mode="none"
++							>(<i class="ph-pencil-line ph-bold"></i
++							>{{ i18n.ts.edited }})</MkTime
++						>
+ 					</MkA>
+ 					<MkVisibility :note="note" />
+ 				</div>
+@@ -39,14 +46,14 @@ import MkVisibility from "@/components/MkVisibility.vue";
+ import MkInstanceTicker from "@/components/MkInstanceTicker.vue";
+ import { notePage } from "@/filters/note";
+ import { userPage } from "@/filters/user";
+-import { deepClone } from "@/scripts/clone";
++import { i18n } from "@/i18n";
+ 
+ const props = defineProps<{
+ 	note: misskey.entities.Note;
+ 	pinned?: boolean;
+ }>();
+ 
+-let note = $ref(deepClone(props.note));
++let note = $ref(props.note);
+ 
+ const showTicker =
+ 	defaultStore.state.instanceTicker === "always" ||
+diff --git a/packages/client/src/components/MkNoteSub.vue b/packages/client/src/components/MkNoteSub.vue
+index f5e70891f..b124912b1 100644
+--- a/packages/client/src/components/MkNoteSub.vue
++++ b/packages/client/src/components/MkNoteSub.vue
+@@ -180,7 +180,6 @@ import { useRouter } from "@/router";
+ import * as os from "@/os";
+ import { reactionPicker } from "@/scripts/reaction-picker";
+ import { i18n } from "@/i18n";
+-import { deepClone } from "@/scripts/clone";
+ import { useNoteCapture } from "@/scripts/use-note-capture";
+ import { defaultStore } from "@/store";
+ 
+@@ -203,7 +202,7 @@ const props = withDefaults(
+ 	}
+ );
+ 
+-let note = $ref(deepClone(props.note));
++let note = $ref(props.note);
+ 
+ const isRenote =
+ 	note.renote != null &&
+@@ -239,15 +238,12 @@ useNoteCapture({
+ 
+ function reply(viaKeyboard = false): void {
+ 	pleaseLogin();
+-	os.post(
+-		{
+-			reply: appearNote,
+-			animation: !viaKeyboard,
+-		},
+-		() => {
+-			focus();
+-		}
+-	);
++	os.post({
++		reply: appearNote,
++		animation: !viaKeyboard,
++	}).then(() => {
++		focus();
++	});
+ }
+ 
+ function react(viaKeyboard = false): void {
+diff --git a/packages/client/src/components/global/MkTime.vue b/packages/client/src/components/global/MkTime.vue
+index 66a6416e8..db53248bb 100644
+--- a/packages/client/src/components/global/MkTime.vue
++++ b/packages/client/src/components/global/MkTime.vue
+@@ -5,6 +5,7 @@
+ 		<template v-else-if="mode === 'detail'"
+ 			>{{ absolute }} ({{ relative }})</template
+ 		>
++		<slot></slot>
+ 	</time>
+ </template>
+ 
+@@ -15,7 +16,7 @@ import { i18n } from "@/i18n";
+ const props = withDefaults(
+ 	defineProps<{
+ 		time: Date | string;
+-		mode?: "relative" | "absolute" | "detail";
++		mode?: "relative" | "absolute" | "detail" | "none";
+ 	}>(),
+ 	{
+ 		mode: "relative",
+diff --git a/packages/client/src/scripts/get-note-menu.ts b/packages/client/src/scripts/get-note-menu.ts
+index 0c8d517e5..03c35e132 100644
+--- a/packages/client/src/scripts/get-note-menu.ts
++++ b/packages/client/src/scripts/get-note-menu.ts
+@@ -105,16 +105,14 @@ export function getNoteMenu(props: {
+ 				noteId: appearNote.id,
+ 			},
+ 			undefined,
+-			null,
+-			(res) => {
+-				if (res.id === "72dab508-c64d-498f-8740-a8eec1ba385a") {
+-					os.alert({
+-						type: "error",
+-						text: i18n.ts.pinLimitExceeded,
+-					});
+-				}
+-			},
+-		);
++		).catch((res) => {
++			if (res.id === "72dab508-c64d-498f-8740-a8eec1ba385a") {
++				os.alert({
++					type: "error",
++					text: i18n.ts.pinLimitExceeded,
++				});
++			}
++		});
+ 	}
+ 
+ 	async function clip(): Promise<void> {
